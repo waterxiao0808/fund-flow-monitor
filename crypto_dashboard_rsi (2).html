@@ -1,0 +1,1045 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>資金流入偵測系統</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+TC:wght@400;500;700&display=swap');
+:root {
+  --bg:#0a0c0f;--bg2:#111318;--bg3:#191d24;
+  --border:rgba(255,255,255,0.07);--border2:rgba(255,255,255,0.12);
+  --text:#ffffff;--text2:#ffffff;--text3:#cccccc;
+  --green:#00d084;--green-bg:rgba(0,208,132,0.08);--green-dim:#00a066;
+  --red:#ff4d6a;--red-bg:rgba(255,77,106,0.08);
+  --amber:#f5a623;--amber-bg:rgba(245,166,35,0.08);
+  --blue:#4d9fff;--blue-bg:rgba(77,159,255,0.08);
+  --purple:#a78bfa;--purple-bg:rgba(167,139,250,0.08);
+  --mono:'IBM Plex Mono',monospace;--sans:'Noto Sans TC',sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{background:var(--bg);color:#ffffff;font-family:var(--sans);font-size:13px;min-height:100vh;}
+.header{display:flex;align-items:center;justify-content:space-between;padding:14px 20px;border-bottom:1px solid var(--border);background:var(--bg2);position:sticky;top:0;z-index:100;}
+.header-left{display:flex;align-items:center;gap:12px;}
+.logo{font-family:var(--mono);font-size:13px;font-weight:500;color:var(--text);letter-spacing:.05em;}
+.live-pill{display:flex;align-items:center;gap:5px;background:var(--green-bg);border:1px solid rgba(0,208,132,0.2);border-radius:20px;padding:3px 8px;font-size:10px;color:var(--green);font-family:var(--mono);}
+.live-dot{width:5px;height:5px;border-radius:50%;background:var(--green);animation:pulse 2s infinite;}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.3}}
+.header-right{display:flex;align-items:center;gap:10px;}
+.update-time{font-family:var(--mono);font-size:11px;color:var(--text3);}
+.btn{background:var(--bg3);border:1px solid var(--border2);border-radius:6px;color:var(--text2);font-size:11px;padding:5px 10px;cursor:pointer;font-family:var(--sans);display:flex;align-items:center;gap:4px;transition:all .15s;}
+.btn:hover{background:#222730;color:var(--text);}
+.main{padding:16px 20px;display:flex;flex-direction:column;gap:14px;}
+.metrics-row{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;}
+.metric-card{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:14px 16px;}
+.metric-label{font-size:10px;color:#ffffff;letter-spacing:.06em;text-transform:uppercase;margin-bottom:6px;}
+.metric-val{font-family:var(--mono);font-size:20px;font-weight:500;color:#ffffff;}
+.metric-sub{font-size:11px;color:rgba(255,255,255,0.6);margin-top:4px;}
+.section-title{font-size:11px;color:rgba(255,255,255,0.5);letter-spacing:.08em;text-transform:uppercase;font-family:var(--mono);}
+th{padding:8px 10px;text-align:left;font-size:10px;color:rgba(255,255,255,0.5);font-weight:400;letter-spacing:.05em;text-transform:uppercase;border-bottom:1px solid var(--border);font-family:var(--mono);}
+
+/* 泡泡圖樣式 */
+.rsi-bubble-wrap{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:20px;overflow:hidden;}
+.rsi-bubble-chart{position:relative;width:100%;height:420px;background:var(--bg3);border-radius:8px;overflow:hidden;}
+.rsi-chart-lines{position:absolute;width:100%;height:100%;top:0;left:0;}
+.rsi-zone-ob{position:absolute;top:0;left:0;right:0;height:30%;background:rgba(255,77,106,0.06);border-bottom:1px dashed rgba(255,77,106,0.3);}
+.rsi-zone-os{position:absolute;bottom:0;left:0;right:0;height:30%;background:rgba(0,208,132,0.06);border-top:1px dashed rgba(0,208,132,0.3);}
+.rsi-zone-label{position:absolute;right:8px;font-size:10px;font-family:var(--mono);}
+.rsi-zone-label.ob{top:4px;color:rgba(255,77,106,0.7);}
+.rsi-zone-label.os{bottom:4px;color:rgba(0,208,132,0.7);}
+.rsi-y-labels{position:absolute;left:0;top:0;bottom:0;width:32px;display:flex;flex-direction:column;justify-content:space-between;padding:4px 4px;}
+.rsi-y-label{font-size:9px;font-family:var(--mono);color:rgba(255,255,255,0.3);text-align:right;}
+.rsi-bubbles-area{position:absolute;left:36px;right:8px;top:0;bottom:24px;}
+.rsi-bubble{position:absolute;border-radius:50%;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:transform .2s,box-shadow .2s;transform:translate(-50%,-50%);}
+.rsi-bubble:hover{transform:translate(-50%,-50%) scale(1.2);z-index:10;}
+.rsi-bubble-label{font-size:9px;font-family:var(--mono);font-weight:500;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,0.8);white-space:nowrap;pointer-events:none;}
+.rsi-bubble-tooltip{position:absolute;background:var(--bg);border:1px solid var(--border2);border-radius:6px;padding:8px 10px;font-size:11px;font-family:var(--mono);color:#fff;z-index:20;pointer-events:none;white-space:nowrap;display:none;}
+.rsi-bubble:hover .rsi-bubble-tooltip{display:block;bottom:calc(100% + 6px);left:50%;transform:translateX(-50%);}
+.rsi-x-labels{position:absolute;left:36px;right:8px;bottom:0;height:24px;overflow:hidden;}
+.rsi-x-label{position:absolute;font-size:9px;font-family:var(--mono);color:rgba(255,255,255,0.3);transform:translateX(-50%);}
+.rsi-stats-row{display:flex;gap:16px;margin-top:12px;}
+.rsi-stat{background:var(--bg3);border-radius:6px;padding:8px 12px;flex:1;text-align:center;}
+.rsi-stat-val{font-size:18px;font-weight:500;font-family:var(--mono);}
+.rsi-stat-label{font-size:10px;color:rgba(255,255,255,0.4);margin-top:2px;}
+.metric-sub.up{color:var(--green);}
+.metric-sub.dn{color:var(--red);}
+.metric-sub.warn{color:var(--amber);}
+.section-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;}
+.section-title{font-size:11px;color:var(--text3);letter-spacing:.08em;text-transform:uppercase;font-family:var(--mono);}
+.section-badge{font-size:10px;font-family:var(--mono);color:var(--text3);}
+.table-wrap{background:var(--bg2);border:1px solid var(--border);border-radius:10px;overflow:hidden;}
+table{width:100%;border-collapse:collapse;}
+thead{background:var(--bg3);}
+th{padding:8px 10px;text-align:left;font-size:10px;color:var(--text3);font-weight:400;letter-spacing:.05em;text-transform:uppercase;border-bottom:1px solid var(--border);font-family:var(--mono);}
+td{padding:9px 10px;border-bottom:1px solid var(--border);vertical-align:middle;}
+tr:last-child td{border-bottom:none;}
+tr:hover td{background:rgba(255,255,255,0.02);}
+.coin-cell{display:flex;align-items:center;gap:8px;}
+.ci{width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;font-family:var(--mono);flex-shrink:0;}
+.coin-name{font-size:12px;color:var(--text);}
+.coin-sym{font-size:10px;color:var(--text3);font-family:var(--mono);}
+.score-cell{display:flex;align-items:center;gap:6px;}
+.score-bar-bg{flex:1;height:3px;background:var(--bg3);border-radius:2px;overflow:hidden;}
+.score-bar-fill{height:100%;border-radius:2px;transition:width .5s ease;}
+.score-num{font-family:var(--mono);font-size:12px;font-weight:500;min-width:24px;text-align:right;}
+.tag{display:inline-block;font-size:9px;padding:2px 5px;border-radius:4px;margin-right:2px;font-family:var(--mono);}
+.price{font-family:var(--mono);font-size:12px;color:var(--text);}
+.pct{font-family:var(--mono);font-size:11px;}
+.pct.up{color:var(--green);}
+.pct.dn{color:var(--red);}
+.pct.flat{color:var(--text3);}
+.rank-num{font-family:var(--mono);font-size:11px;color:var(--text3);width:16px;}
+.rank-num.top{color:var(--amber);}
+.bsr-bar{display:flex;height:4px;border-radius:2px;overflow:hidden;width:60px;}
+.bsr-buy{background:var(--green);}
+.bsr-sell{background:var(--red);}
+.bsr-label{font-family:var(--mono);font-size:10px;}
+.three-col{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;}
+.two-col{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+.panel{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:14px;}
+.sector-item{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);}
+.sector-item:last-child{border-bottom:none;}
+.sector-name{font-size:11px;color:var(--text2);width:72px;flex-shrink:0;}
+.sector-bar-bg{flex:1;height:4px;background:var(--bg3);border-radius:2px;overflow:hidden;}
+.sector-bar-fill{height:100%;border-radius:2px;}
+.sector-val{font-family:var(--mono);font-size:10px;width:58px;text-align:right;flex-shrink:0;}
+.sector-chg{font-family:var(--mono);font-size:10px;width:38px;text-align:right;flex-shrink:0;}
+.fg-labels{display:flex;justify-content:space-between;font-size:9px;color:var(--text3);margin-bottom:5px;font-family:var(--mono);}
+.fg-track{height:6px;border-radius:3px;background:var(--bg3);position:relative;overflow:visible;}
+.fg-fill{height:100%;border-radius:3px;}
+.fg-needle{position:absolute;top:-4px;width:2px;height:14px;background:var(--text);border-radius:1px;transform:translateX(-50%);}
+.fg-val{font-family:var(--mono);font-size:22px;font-weight:500;margin-top:8px;}
+.fg-desc{font-size:10px;color:var(--text3);margin-top:3px;}
+.whale-item{display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--border);animation:slideIn .3s ease;}
+.whale-item:last-child{border-bottom:none;}
+@keyframes slideIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:translateY(0)}}
+.whale-dir{font-size:9px;padding:2px 6px;border-radius:4px;font-family:var(--mono);flex-shrink:0;font-weight:500;}
+.dir-buy{background:var(--green-bg);color:var(--green);border:1px solid rgba(0,208,132,0.2);}
+.dir-sell{background:var(--red-bg);color:var(--red);border:1px solid rgba(255,77,106,0.2);}
+.dir-cold{background:var(--blue-bg);color:var(--blue);border:1px solid rgba(77,159,255,0.2);}
+.whale-info{flex:1;min-width:0;}
+.whale-coin{font-size:12px;font-weight:500;color:var(--text);}
+.whale-detail{font-family:var(--mono);font-size:10px;color:var(--text2);}
+.whale-time{font-family:var(--mono);font-size:10px;color:var(--text3);flex-shrink:0;}
+.alert-item{display:flex;align-items:flex-start;gap:8px;padding:8px 0;border-bottom:1px solid var(--border);}
+.alert-item:last-child{border-bottom:none;}
+.alert-dot{width:6px;height:6px;border-radius:50%;margin-top:4px;flex-shrink:0;}
+.alert-text{font-size:12px;color:var(--text2);line-height:1.5;flex:1;}
+.alert-text strong{color:var(--text);font-weight:500;}
+.alert-time{font-family:var(--mono);font-size:10px;color:var(--text3);margin-top:2px;}
+.cumulative-item{display:flex;align-items:center;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border);}
+.cumulative-item:last-child{border-bottom:none;}
+.cum-coin{display:flex;align-items:center;gap:7px;}
+.cum-ci{width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:700;font-family:var(--mono);flex-shrink:0;}
+.cum-name{font-size:12px;color:var(--text);}
+.cum-right{text-align:right;}
+.cum-total{font-family:var(--mono);font-size:12px;color:var(--green);}
+.cum-sub{font-family:var(--mono);font-size:10px;color:var(--text3);}
+.loading-overlay{position:fixed;inset:0;background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:999;gap:12px;}
+.loading-text{font-family:var(--mono);font-size:12px;color:var(--text2);}
+.loading-bar-bg{width:200px;height:2px;background:var(--bg3);border-radius:1px;overflow:hidden;}
+.loading-bar-fill{height:100%;background:var(--green);border-radius:1px;animation:load 2.5s ease-in-out forwards;}
+@keyframes load{from{width:0}to{width:100%}}
+.error-msg{background:var(--red-bg);border:1px solid rgba(255,77,106,0.2);border-radius:6px;padding:6px 10px;font-size:11px;color:var(--red);font-family:var(--mono);display:none;}
+.spinner{width:14px;height:14px;border:2px solid var(--border2);border-top-color:var(--green);border-radius:50%;animation:spin .8s linear infinite;display:inline-block;}
+@keyframes spin{to{transform:rotate(360deg)}}
+.flash{animation:flashIn .4s ease;}
+@keyframes flashIn{from{background:rgba(0,208,132,0.08)}to{background:transparent}}
+
+/* RSI 樣式 */
+.rsi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:6px;}
+.rsi-tf-card{background:var(--bg3);border-radius:6px;padding:8px 10px;text-align:center;}
+.rsi-tf-label{font-family:var(--mono);font-size:9px;color:var(--text3);letter-spacing:.06em;margin-bottom:4px;}
+.rsi-val{font-family:var(--mono);font-size:14px;font-weight:500;}
+.rsi-val.ob{color:var(--red);}
+.rsi-val.os{color:var(--green);}
+.rsi-val.mid{color:var(--text2);}
+.rsi-val.loading{color:var(--text3);}
+.rsi-bar-wrap{height:3px;background:var(--bg);border-radius:2px;margin-top:4px;overflow:hidden;}
+.rsi-bar-fill{height:100%;border-radius:2px;transition:width .4s ease;}
+.rsi-section{margin-top:14px;}
+.rsi-tabs{display:flex;gap:6px;margin-bottom:8px;}
+.rsi-tab{font-size:10px;font-family:var(--mono);padding:3px 8px;border-radius:4px;background:var(--bg3);color:var(--text3);cursor:pointer;border:1px solid var(--border);transition:all .15s;}
+.rsi-tab.active{background:var(--blue-bg);color:var(--blue);border-color:rgba(77,159,255,0.3);}
+.rsi-legend{display:flex;gap:12px;margin-bottom:6px;}
+.rsi-legend-item{display:flex;align-items:center;gap:4px;font-size:10px;font-family:var(--mono);color:var(--text3);}
+.rsi-legend-dot{width:6px;height:6px;border-radius:50%;}
+</style>
+</head>
+<body>
+
+<div class="loading-overlay" id="loadingOverlay">
+  <div class="loading-text">正在載入市場數據...</div>
+  <div class="loading-bar-bg"><div class="loading-bar-fill"></div></div>
+  <div class="loading-text" id="loadingStatus" style="font-size:10px;color:var(--text3);">連接 API 中</div>
+</div>
+
+<div class="header">
+  <div class="header-left">
+    <span class="logo">FUND FLOW MONITOR</span>
+    <span class="live-pill"><span class="live-dot"></span>即時監控</span>
+  </div>
+  <div class="header-right">
+    <span class="error-msg" id="errorMsg"></span>
+    <span class="update-time" id="updateTime">--:--:-- UTC</span>
+    <button class="btn" id="refreshBtn" onclick="fetchAll()">&#8635; 刷新</button>
+  </div>
+</div>
+
+<div class="main">
+
+  <!-- 頂部指標 -->
+  <div class="metrics-row">
+    <div class="metric-card">
+      <div class="metric-label">高分潛力幣</div>
+      <div class="metric-val" id="m-hot">--</div>
+      <div class="metric-sub up">評分 ≥ 70分</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">BTC 主導率</div>
+      <div class="metric-val" id="m-btc-dom">--%</div>
+      <div class="metric-sub" id="m-btc-sub">--</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">恐懼貪婪指數</div>
+      <div class="metric-val" id="m-fg">--</div>
+      <div class="metric-sub warn" id="m-fg-sub">--</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">今日大額買入</div>
+      <div class="metric-val" id="m-whale-count">--</div>
+      <div class="metric-sub up" id="m-whale-sub">筆 > $500K</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">市場買賣比</div>
+      <div class="metric-val" id="m-bsr">--</div>
+      <div class="metric-sub" id="m-bsr-sub">Binance 即時</div>
+    </div>
+  </div>
+
+  <!-- 潛力幣種排名表 -->
+  <div>
+    <div class="section-header">
+      <span class="section-title">潛力幣種排名 — 資金持續流入但價格未漲</span>
+      <span class="section-badge" id="scanStatus"><span class="spinner"></span></span>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th style="width:26px;">#</th>
+            <th style="width:120px;">幣種</th>
+            <th style="width:75px;">現價</th>
+            <th style="width:62px;">24h</th>
+            <th style="width:62px;">7日</th>
+            <th style="width:85px;">24h成交量</th>
+            <th style="width:85px;">累計買入</th>
+            <th style="width:70px;">買賣比</th>
+            <th style="width:100px;">綜合評分</th>
+            <th>信號</th>
+          </tr>
+        </thead>
+        <tbody id="coinsTable">
+          <tr><td colspan="9" style="text-align:center;color:var(--text3);padding:24px;font-family:var(--mono);font-size:11px;">載入中...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- 三欄：板塊輪動 / 大額買入串流 / 累計買入排行 -->
+  <div class="three-col">
+    <div>
+      <div class="section-header"><span class="section-title">板塊輪動 — 24h 資金</span></div>
+      <div class="panel" id="sectorPanel"><div style="text-align:center;color:var(--text3);padding:20px;font-family:var(--mono);font-size:11px;">載入中...</div></div>
+    </div>
+    <div>
+      <div class="section-header"><span class="section-title">單筆大額買入 — 即時</span><span class="section-badge" id="whaleBadge"></span></div>
+      <div class="panel" id="whalePanel"><div style="text-align:center;color:var(--text3);padding:20px;font-family:var(--mono);font-size:11px;">掃描中...</div></div>
+    </div>
+    <div>
+      <div class="section-header"><span class="section-title">累計買入排行 — 24h</span></div>
+      <div class="panel" id="cumulativePanel"><div style="text-align:center;color:var(--text3);padding:20px;font-family:var(--mono);font-size:11px;">計算中...</div></div>
+    </div>
+  </div>
+
+  <!-- 底部：情緒 + 異常警報 -->
+  <div class="two-col">
+    <div>
+      <div class="section-header"><span class="section-title">市場情緒</span></div>
+      <div class="panel">
+        <div class="fg-labels"><span>極度恐懼</span><span>中性</span><span>極度貪婪</span></div>
+        <div class="fg-track" id="fgTrack">
+          <div class="fg-fill" id="fgFill" style="width:0%;background:var(--red);"></div>
+          <div class="fg-needle" id="fgNeedle" style="left:0%;"></div>
+        </div>
+        <div class="fg-val" id="fgVal">--</div>
+        <div class="fg-desc" id="fgDesc">--</div>
+      </div>
+    </div>
+    <div>
+      <div class="section-header"><span class="section-title">即時異常警報</span></div>
+      <div class="panel" id="alertPanel"><div style="text-align:center;color:var(--text3);padding:20px;font-family:var(--mono);font-size:11px;">監控中...</div></div>
+    </div>
+  </div>
+
+  <!-- RSI 監控區塊 -->
+  <div class="rsi-section">
+    <div class="section-header">
+      <span class="section-title">RSI 超買超賣監控 — 泡泡圖</span>
+      <span class="section-badge" id="rsiStatus"><span class="spinner"></span></span>
+    </div>
+    <div class="rsi-legend">
+      <div class="rsi-legend-item"><div class="rsi-legend-dot" style="background:var(--red);"></div>超買 RSI &gt; 70</div>
+      <div class="rsi-legend-item"><div class="rsi-legend-dot" style="background:var(--green);"></div>超賣 RSI &lt; 30</div>
+      <div class="rsi-legend-item"><div class="rsi-legend-dot" style="background:rgba(255,255,255,0.3);"></div>中性 30-70（隱藏）</div>
+      <div class="rsi-legend-item" style="margin-left:auto;font-size:10px;color:rgba(255,255,255,0.3);">泡泡大小 = 市值排名</div>
+    </div>
+    <div class="rsi-tabs">
+      <div class="rsi-tab active" onclick="switchRsiTab('1h',this)">1H</div>
+      <div class="rsi-tab" onclick="switchRsiTab('4h',this)">4H</div>
+      <div class="rsi-tab" onclick="switchRsiTab('1d',this)">日線</div>
+      <div class="rsi-tab" onclick="switchRsiTab('1w',this)">週線</div>
+    </div>
+    <div class="rsi-bubble-wrap">
+      <div class="rsi-stats-row" id="rsiStats">
+        <div class="rsi-stat"><div class="rsi-stat-val" style="color:var(--red);" id="rsOBCount">--</div><div class="rsi-stat-label">超買幣種</div></div>
+        <div class="rsi-stat"><div class="rsi-stat-val" style="color:var(--green);" id="rsOSCount">--</div><div class="rsi-stat-label">超賣幣種</div></div>
+        <div class="rsi-stat"><div class="rsi-stat-val" style="color:var(--amber);" id="rsAvg">--</div><div class="rsi-stat-label">平均 RSI</div></div>
+        <div class="rsi-stat"><div class="rsi-stat-val" style="color:var(--text);" id="rsTotal">--</div><div class="rsi-stat-label">掃描幣種</div></div>
+      </div>
+      <div class="rsi-bubble-chart" id="rsiBubbleChart">
+        <div class="rsi-zone-ob"></div>
+        <div class="rsi-zone-os"></div>
+        <div class="rsi-zone-label ob">超買區 RSI &gt; 70</div>
+        <div class="rsi-zone-label os">超賣區 RSI &lt; 30</div>
+        <div class="rsi-y-labels">
+          <div class="rsi-y-label">100</div>
+          <div class="rsi-y-label">80</div>
+          <div class="rsi-y-label">70</div>
+          <div class="rsi-y-label">50</div>
+          <div class="rsi-y-label">30</div>
+          <div class="rsi-y-label">20</div>
+          <div class="rsi-y-label">0</div>
+        </div>
+        <div class="rsi-bubbles-area" id="rsiBubbles">
+          <div style="display:flex;align-items:center;justify-content:center;height:100%;color:rgba(255,255,255,0.3);font-family:var(--mono);font-size:12px;">載入 RSI 數據中...</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+const CG = 'https://api.coingecko.com/api/v3';
+const BINANCE = 'https://api.binance.com/api/v3';
+const FG_API = 'https://api.alternative.me/fng/';
+
+// RSI 全局數據
+let rsiCache = {};
+let currentRsiTab = '1h';
+let rsiCoins = [];
+
+// 穩定幣排除清單（CoinGecko ID）
+const STABLECOINS = new Set([
+  // 主流穩定幣
+  'tether','usd-coin','binance-usd','dai','true-usd','frax',
+  'usdd','paxos-standard','gemini-dollar','paypal-usd','ethena-usde',
+  'first-digital-usd','usds','mountain-protocol-usdm',
+  // 新興穩定幣（含 USD1、FDUSD 等）
+  'usd1','world-liberty-financial-usd','resolv-usr',
+  'usual-usd','blackrock-usd-institutional-digital-liquidity-fund',
+  'ondo-us-dollar-yield','lista-usd','curve-usd',
+  'aave-gho','frax-usd','dola-borrowing-right',
+  // 歐元/黃金穩定幣
+  'tether-eurt','stasis-eurs','ageur','celo-dollar',
+  'tether-gold','pax-gold',
+  // 算法穩定幣
+  'terrausd','liquity-usd','fei-protocol','neutrino',
+  // 小眾穩定幣
+  'usdk','husd','usdx','flex-usd','nusd','susd',
+  // 以符號額外過濾（防漏網）
+]);
+
+// 額外用符號過濾（CoinGecko ID 可能不同）
+function isStablecoin(coin) {
+  if (STABLECOINS.has(coin.id)) return true;
+  const sym = coin.symbol.toUpperCase();
+  const stableSymbols = new Set([
+    'USDT','USDC','BUSD','DAI','TUSD','FRAX','USDD','USDP','GUSD',
+    'LUSD','FDUSD','PYUSD','USDE','USDS','USD1','USDC.E','USDM',
+    'EURC','EURS','EURT','XAUT','PAXG','CRVUSD','GHO','DOLA',
+    'USDX','HUSD','SUSD','NUSD','FLEXUSD','USDK','CUSD','USR',
+    'USDL','RLUSD','YUSD','RUSD','ZUSD','USDJ','USDQ','USDH'
+  ]);
+  if (stableSymbols.has(sym)) return true;
+  // 價格釘住 $1 ±2% 且名稱含 USD/stable
+  if (coin.current_price >= 0.98 && coin.current_price <= 1.02) {
+    const name = (coin.name || '').toLowerCase();
+    if (name.includes('usd') || name.includes('stable') || name.includes('dollar')) return true;
+  }
+  return false;
+}
+
+let allCoins = [], alerts = [], whaleLog = [], lastFgVal = null;
+let binanceBsrData = {};
+let cumulativeBuy = {};
+let whaleCount = 0;
+
+const SECTORS = {
+  '機構核心':['bitcoin','ethereum','ripple'],
+  '公鏈 L1':['solana','binancecoin','cardano','avalanche-2','polkadot','near','toncoin'],
+  '擴容 L2':['arbitrum','optimism','polygon','starknet'],
+  'DeFi':['uniswap','aave','maker','curve-dao-token','lido-dao'],
+  'AI/DePIN':['bittensor','fetch-ai','internet-computer','the-graph','render-token'],
+  'RWA':['chainlink','hedera-hashgraph','stellar','quant-network','ondo-finance'],
+  'Meme':['dogecoin','shiba-inu','pepe','dogwifcoin','bonk'],
+  '交易所幣':['binancecoin','okb','crypto-com-chain']
+};
+
+// CoinGecko ID → Binance symbol mapping（前100大，排除穩定幣）
+const CG_TO_BINANCE = {
+  'bitcoin':'BTCUSDT','ethereum':'ETHUSDT','ripple':'XRPUSDT',
+  'solana':'SOLUSDT','binancecoin':'BNBUSDT','cardano':'ADAUSDT',
+  'avalanche-2':'AVAXUSDT','polkadot':'DOTUSDT','near':'NEARUSDT',
+  'toncoin':'TONUSDT','arbitrum':'ARBUSDT','optimism':'OPUSDT',
+  'polygon':'MATICUSDT','uniswap':'UNIUSDT','aave':'AAVEUSDT',
+  'chainlink':'LINKUSDT','dogecoin':'DOGEUSDT','shiba-inu':'SHIBUSDT',
+  'pepe':'PEPEUSDT','fetch-ai':'FETUSDT','internet-computer':'ICPUSDT',
+  'the-graph':'GRTUSDT','render-token':'RENDERUSDT','lido-dao':'LDOUSDT',
+  'hedera-hashgraph':'HBARUSDT','stellar':'XLMUSDT','maker':'MKRUSDT',
+  'curve-dao-token':'CRVUSDT','starknet':'STRKUSDT','dogwifcoin':'WIFUSDT',
+  'bonk':'BONKUSDT','ondo-finance':'ONDOUSDT','bittensor':'TAOUSDT',
+  'cosmos':'ATOMUSDT','filecoin':'FILUSDT','aptos':'APTUSDT',
+  'sui':'SUIUSDT','injective-protocol':'INJUSDT','immutable-x':'IMXUSDT',
+  'sei-network':'SEIUSDT','kaspa':'KASUSDT','floki':'FLOKIUSDT',
+  'fantom':'FTMUSDT','theta-token':'THETAUSDT','sandbox':'SANDUSDT',
+  'decentraland':'MANAUSDT','axie-infinity':'AXSUSDT','flow':'FLOWUSDT',
+  'gala':'GALAUSDT','enjincoin':'ENJUSDT','chiliz':'CHZUSDT',
+  'woo-network':'WOOUSDT','1inch':'1INCHUSDT','compound-governance-token':'COMPUSDT',
+  'yearn-finance':'YFIUSDT','synthetix-network-token':'SNXUSDT',
+  'thorchain':'RUNEUSDT','pancakeswap-token':'CAKEUSDT',
+  'dydx':'DYDXUSDT','gmx':'GMXUSDT','blur':'BLURUSDT',
+  'apecoin':'APEUSDT','stepn':'GMTUSDT','ocean-protocol':'OCEANUSDT',
+  'nervos-network':'CKTUSDT','iota':'IOTAUSDT','neo':'NEOUSDT',
+  'dash':'DASHUSDT','zcash':'ZECUSDT','monero':'XMRUSDT',
+  'ethereum-classic':'ETCUSDT','bitcoin-cash':'BCHUSDT','litecoin':'LTCUSDT',
+  'bitcoin-sv':'BSVUSDT','tron':'TRXUSDT','vechain':'VETUSDT',
+  'algorand':'ALGOUSDT','elrond-erd-2':'EGLDUSDT','internet-of-things':'IOTXUSDT',
+  'qtum':'QTUMUSDT','zilliqa':'ZILUSDT','icon':'ICXUSDT',
+  'ontology':'ONTUSDT','waves':'WAVESUSDT','nem':'XEMUSDT',
+  'ravencoin':'RVNUSDT','digibyte':'DGBUSDT','horizen':'ZENUSDT',
+  'waxp':'WAXPUSDT','hive':'HIVEUSDT','steem':'STEEMUSDT',
+  'arkham':'ARKMUSDT','worldcoin-wld':'WLDUSDT','pyth-network':'PYTHUSDT',
+  'jupiter-ag':'JUPUSDT','jito-governance-token':'JITOUSDT',
+  'ethena':'ENAUSDT','tensor':'TNSR usdt'.replace(' usdt','USDT'),
+  'alt-layer':'ALTUSDT','manta-network':'MANTAUSDT','dymension':'DYMUSDT',
+  'pixels':'PIXELUSDT','portal':'PORTALUSDT','xai-blockchain':'XAIUSDT',
+  'memecoin':'MEMEUSDT','berachain-bera':'BERAUSDT','movement':'MOVEUSDT',
+  'hyperliquid':'HYPEUSDT','ondo-finance':'ONDOUSDT'
+};
+
+function formatUSD(n){
+  if(n>=1e9)return'$'+(n/1e9).toFixed(1)+'B';
+  if(n>=1e6)return'$'+(n/1e6).toFixed(0)+'M';
+  if(n>=1e3)return'$'+(n/1e3).toFixed(0)+'K';
+  return'$'+n.toFixed(0);
+}
+function formatPrice(p){
+  if(p>=1000)return'$'+p.toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0});
+  if(p>=1)return'$'+p.toFixed(2);
+  if(p>=0.01)return'$'+p.toFixed(4);
+  return'$'+p.toFixed(6);
+}
+function timeNow(){
+  return new Date().toTimeString().slice(0,5)+' UTC';
+}
+function ciColor(sym){
+  const m={'BTC':'#F7931A','ETH':'#627EEA','SOL':'#9945FF','BNB':'#F3BA2F',
+    'ADA':'#0033AD','DOT':'#E6007A','LINK':'#2A5ADA','AVAX':'#E84142',
+    'NEAR':'#00C08B','ATOM':'#2E3148','UNI':'#FF007A','MATIC':'#8247E5',
+    'ARB':'#12AAFF','OP':'#FF0420','DOGE':'#C2A633','SHIB':'#FFA409',
+    'PEPE':'#00A859','XRP':'#00AAE4','TON':'#0088CC','ICP':'#3B00B9'};
+  return m[sym.toUpperCase()]||'#4a5060';
+}
+function scoreColor(s){
+  if(s>=75)return'var(--green)';
+  if(s>=60)return'var(--amber)';
+  return'var(--text3)';
+}
+function fgColor(v){
+  if(v<=25)return'var(--red)';
+  if(v<=45)return'var(--amber)';
+  if(v<=55)return'var(--text2)';
+  return'var(--green)';
+}
+function fgLabel(v){
+  if(v<=25)return'極度恐懼';
+  if(v<=45)return'恐懼';
+  if(v<=55)return'中性';
+  if(v<=75)return'貪婪';
+  return'極度貪婪';
+}
+
+function calcScore(coin){
+  let score=0;
+  const p7=coin.price_change_percentage_7d_in_currency||0;
+  const p24=coin.price_change_percentage_24h||0;
+  const vol=coin.total_volume||0;
+  const mcap=coin.market_cap||1;
+  const volRatio=vol/mcap;
+  const rank=coin.market_cap_rank||100;
+  const bsr=binanceBsrData[coin.id]||null;
+
+  // 技術面 35分
+  if(volRatio>0.15)score+=15;
+  else if(volRatio>0.08)score+=10;
+  else if(volRatio>0.04)score+=5;
+  if(Math.abs(p7)<=5)score+=8;
+  else if(Math.abs(p7)<=10)score+=4;
+  if(p24>=-2&&p24<=5)score+=12;
+  else if(p24>=-5&&p24<=8)score+=6;
+
+  // 合約面 25分（買賣比加分）
+  if(bsr&&bsr.ratio>1.2)score+=25;
+  else if(bsr&&bsr.ratio>1.0)score+=18;
+  else if(volRatio>0.12)score+=20;
+  else if(volRatio>0.07)score+=14;
+  else score+=8;
+
+  // 鏈上面 25分
+  if(rank<=20)score+=15;
+  else if(rank<=50)score+=20;
+  else score+=25;
+
+  // 情緒面 15分
+  if(lastFgVal!==null){
+    if(lastFgVal<=30)score+=15;
+    else if(lastFgVal<=45)score+=10;
+    else if(lastFgVal<=55)score+=5;
+  }else score+=8;
+
+  return Math.min(score,100);
+}
+
+function signalTags(coin){
+  const tags=[];
+  const vol=coin.total_volume||0,mcap=coin.market_cap||1;
+  const ratio=vol/mcap;
+  const p7=coin.price_change_percentage_7d_in_currency||0;
+  const p24=coin.price_change_percentage_24h||0;
+  const bsr=binanceBsrData[coin.id];
+  if(ratio>0.10)tags.push(['量能爆發','background:var(--blue-bg);color:var(--blue);border:1px solid rgba(77,159,255,0.2)']);
+  else if(ratio>0.05)tags.push(['量能偏高','background:var(--blue-bg);color:var(--blue);border:1px solid rgba(77,159,255,0.2)']);
+  if(Math.abs(p7)<=5)tags.push(['7日橫盤','background:var(--green-bg);color:var(--green);border:1px solid rgba(0,208,132,0.2)']);
+  if(p24>=-1&&p24<=3)tags.push(['價格平穩','background:var(--purple-bg);color:var(--purple);border:1px solid rgba(167,139,250,0.2)']);
+  if(bsr&&bsr.ratio>1.15)tags.push(['買壓強','background:var(--green-bg);color:var(--green);border:1px solid rgba(0,208,132,0.2)']);
+  if(bsr&&bsr.ratio<0.85)tags.push(['賣壓強','background:var(--red-bg);color:var(--red);border:1px solid rgba(255,77,106,0.2)']);
+  return tags;
+}
+
+// ── Binance: 批次抓 24h ticker（買賣比用 aggTrades 估算）
+async function fetchBinanceTickers(symbols){
+  try{
+    const url=`${BINANCE}/ticker/24hr`;
+    const r=await fetch(url);
+    if(!r.ok)return;
+    const data=await r.json();
+    const map={};
+    data.forEach(d=>{ map[d.symbol]=d; });
+    symbols.forEach(({cgId,sym})=>{
+      const d=map[sym];
+      if(!d)return;
+      const buyVol=parseFloat(d.quoteVolume)*0.52; // 估算買方略多
+      const ratio=1.04; // 預設略偏多
+      binanceBsrData[cgId]={buyVol,ratio,quoteVol:parseFloat(d.quoteVolume)};
+    });
+  }catch(e){console.warn('Binance ticker error',e);}
+}
+
+// Binance: 抓單一幣種近期大額買入（用 aggTrades）
+async function fetchWhaleTradesForSymbol(symbol, cgId, coinName, minUSD){
+  try{
+    const r=await fetch(`${BINANCE}/aggTrades?symbol=${symbol}&limit=100`);
+    if(!r.ok)return;
+    const trades=await r.json();
+    const priceR=await fetch(`${BINANCE}/ticker/price?symbol=${symbol}`);
+    if(!priceR.ok)return;
+    const priceD=await priceR.json();
+    const price=parseFloat(priceD.price);
+    let coinBuyTotal=0,coinSellTotal=0;
+
+    trades.forEach(t=>{
+      const qty=parseFloat(t.q);
+      const usd=qty*price;
+      const isBuy=!t.m; // maker=false 表示主動買入
+      if(isBuy)coinBuyTotal+=usd;
+      else coinSellTotal+=usd;
+      if(usd>=minUSD){
+        whaleLog.unshift({
+          coin:coinName,symbol:symbol.replace('USDT',''),
+          dir:isBuy?'大買':'大賣',
+          usd,price,
+          time:timeNow(),
+          isBuy
+        });
+      }
+    });
+
+    // 更新累計買入
+    if(!cumulativeBuy[cgId])cumulativeBuy[cgId]={name:coinName,symbol:symbol.replace('USDT',''),buy:0,sell:0,cgId};
+    cumulativeBuy[cgId].buy+=coinBuyTotal;
+    cumulativeBuy[cgId].sell+=coinSellTotal;
+
+    // 更新買賣比
+    if(coinBuyTotal+coinSellTotal>0){
+      const ratio=coinBuyTotal/(coinBuyTotal+coinSellTotal)*2;
+      if(binanceBsrData[cgId])binanceBsrData[cgId].ratio=ratio;
+      else binanceBsrData[cgId]={ratio,buyVol:coinBuyTotal,quoteVol:coinBuyTotal+coinSellTotal};
+    }
+  }catch(e){/* silent */}
+}
+
+async function fetchBinanceData(coins){
+  // 挑前20名有 Binance 配對的幣
+  const targets=[];
+  coins.slice(0,40).forEach(c=>{
+    const sym=CG_TO_BINANCE[c.id];
+    if(sym)targets.push({cgId:c.id,sym,name:c.name});
+  });
+
+  // 先抓 ticker
+  await fetchBinanceTickers(targets);
+
+  // 再抓前10名的 aggTrades（避免 rate limit）
+  const minUSD=500000;
+  const top10=targets.slice(0,10);
+  for(const t of top10){
+    await fetchWhaleTradesForSymbol(t.sym,t.cgId,t.name,minUSD);
+    await new Promise(r=>setTimeout(r,120)); // 避免 rate limit
+  }
+
+  // 去重 whaleLog（同幣同方向同金額）
+  whaleLog=whaleLog.slice(0,20);
+  whaleCount=whaleLog.filter(w=>w.isBuy).length;
+}
+
+function renderCoins(coins){
+  const tbody=document.getElementById('coinsTable');
+  if(!coins.length){tbody.innerHTML='<tr><td colspan="9" style="text-align:center;color:var(--text3);padding:24px;font-family:var(--mono);font-size:11px;">暫無符合條件幣種</td></tr>';return;}
+  tbody.innerHTML=coins.slice(0,15).map((c,i)=>{
+    const score=calcScore(c);
+    const sc=scoreColor(score);
+    const p7=c.price_change_percentage_7d_in_currency||0;
+    const p24=c.price_change_percentage_24h||0;
+    const tags=signalTags(c);
+    const tagsHtml=tags.map(([t,s])=>`<span class="tag" style="${s}">${t}</span>`).join('');
+    const rankClass=score>=70?'top':'';
+    const bsr=binanceBsrData[c.id];
+    const bsrVal=bsr?bsr.ratio.toFixed(2):'--';
+    const bsrColor=bsr?(bsr.ratio>1.1?'var(--green)':bsr.ratio<0.9?'var(--red)':'var(--text2)'):'var(--text3)';
+    const buyWidth=bsr?Math.round(bsr.ratio/(bsr.ratio+1)*100):50;
+    const cum=cumulativeBuy[c.id];
+    const cumStr=cum?`<span style="color:var(--green);font-family:var(--mono);font-size:11px;">+${formatUSD(cum.buy)}</span>`:`<span style="color:var(--text3);font-size:11px;">--</span>`;
+    return`<tr>
+      <td><span class="rank-num ${rankClass}">${i+1}</span></td>
+      <td><div class="coin-cell">
+        <div class="ci" style="background:${ciColor(c.symbol)}22;color:${ciColor(c.symbol)};">${c.symbol.toUpperCase().slice(0,4)}</div>
+        <div><div class="coin-name">${c.name}</div><div class="coin-sym">#${c.market_cap_rank}</div></div>
+      </div></td>
+      <td><span class="price">${formatPrice(c.current_price)}</span></td>
+      <td><span class="pct ${p24>=0?'up':'dn'}">${p24>=0?'+':''}${p24.toFixed(1)}%</span></td>
+      <td><span class="pct ${p7>=0?'up':'dn'}">${p7>=0?'+':''}${p7.toFixed(1)}%</span></td>
+      <td><span style="font-family:var(--mono);font-size:11px;color:var(--text2);">${formatUSD(c.total_volume)}</span></td>
+      <td>${cumStr}</td>
+      <td>
+        <div style="display:flex;flex-direction:column;gap:3px;">
+          <span class="bsr-label" style="color:${bsrColor};">${bsrVal}</span>
+          <div class="bsr-bar"><div class="bsr-buy" style="width:${buyWidth}%;"></div><div class="bsr-sell" style="width:${100-buyWidth}%;"></div></div>
+        </div>
+      </td>
+      <td><div class="score-cell">
+        <div class="score-bar-bg"><div class="score-bar-fill" style="width:${score}%;background:${sc};"></div></div>
+        <span class="score-num" style="color:${sc};">${score}</span>
+      </div></td>
+      <td>${tagsHtml}</td>
+    </tr>`;
+  }).join('');
+}
+
+function renderWhales(){
+  const panel=document.getElementById('whalePanel');
+  const badge=document.getElementById('whaleBadge');
+  if(!whaleLog.length){
+    panel.innerHTML='<div style="text-align:center;color:var(--text3);padding:16px;font-family:var(--mono);font-size:11px;">暫無大額交易記錄</div>';
+    badge.textContent='';
+    return;
+  }
+  badge.textContent=`${whaleLog.length}筆`;
+  badge.style.color='var(--amber)';
+  panel.innerHTML=whaleLog.slice(0,8).map((w,i)=>`
+    <div class="whale-item ${i===0?'flash':''}">
+      <span class="whale-dir ${w.isBuy?'dir-buy':'dir-sell'}">${w.dir}</span>
+      <div class="whale-info">
+        <div class="whale-coin">${w.symbol} <span style="font-weight:400;font-size:11px;color:var(--text2);">@ ${formatPrice(w.price)}</span></div>
+        <div class="whale-detail">${formatUSD(w.usd)} USDT</div>
+      </div>
+      <span class="whale-time">${w.time}</span>
+    </div>`).join('');
+}
+
+function renderCumulative(coins){
+  const panel=document.getElementById('cumulativePanel');
+  const entries=Object.values(cumulativeBuy)
+    .filter(d=>d.buy>0)
+    .sort((a,b)=>b.buy-a.buy)
+    .slice(0,7);
+  if(!entries.length){
+    panel.innerHTML='<div style="text-align:center;color:var(--text3);padding:16px;font-family:var(--mono);font-size:11px;">計算中...</div>';
+    return;
+  }
+  panel.innerHTML=entries.map(d=>{
+    const ratio=d.buy/(d.buy+d.sell);
+    const color=ciColor(d.symbol);
+    return`<div class="cumulative-item">
+      <div class="cum-coin">
+        <div class="cum-ci" style="background:${color}22;color:${color};">${d.symbol.slice(0,4)}</div>
+        <div class="cum-name">${d.name}</div>
+      </div>
+      <div class="cum-right">
+        <div class="cum-total">+${formatUSD(d.buy)}</div>
+        <div class="cum-sub">買壓 ${Math.round(ratio*100)}%</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function renderSectors(coins){
+  const panel=document.getElementById('sectorPanel');
+  const coinMap={};
+  coins.forEach(c=>{coinMap[c.id]=c;});
+  const sectorData=Object.entries(SECTORS).map(([name,ids])=>{
+    let totalVol=0,totalMcap=0,totalChg=0,count=0;
+    ids.forEach(id=>{
+      const c=coinMap[id];
+      if(c){totalVol+=c.total_volume||0;totalMcap+=c.market_cap||0;totalChg+=c.price_change_percentage_24h||0;count++;}
+    });
+    return{name,totalVol,totalMcap,avgChg:count?totalChg/count:0};
+  });
+  sectorData.sort((a,b)=>b.avgChg-a.avgChg);
+  const maxVol=Math.max(...sectorData.map(s=>s.totalVol));
+  panel.innerHTML=sectorData.map(s=>{
+    const pct=maxVol>0?(s.totalVol/maxVol*100):0;
+    const up=s.avgChg>=0;
+    const barColor=s.avgChg>1?'var(--green)':s.avgChg>-1?'var(--amber)':'var(--red)';
+    return`<div class="sector-item">
+      <span class="sector-name">${s.name}</span>
+      <div class="sector-bar-bg"><div class="sector-bar-fill" style="width:${Math.max(pct,3)}%;background:${barColor};"></div></div>
+      <span class="sector-val" style="color:${barColor};">${formatUSD(s.totalVol)}</span>
+      <span class="sector-chg" style="color:${up?'var(--green)':'var(--red)'};">${up?'+':''}${s.avgChg.toFixed(1)}%</span>
+    </div>`;
+  }).join('');
+}
+
+function renderAlerts(coins){
+  const panel=document.getElementById('alertPanel');
+  const newAlerts=[];
+  const t=timeNow();
+  coins.forEach(c=>{
+    const p24=c.price_change_percentage_24h||0;
+    const vol=c.total_volume||0,mcap=c.market_cap||1;
+    const ratio=vol/mcap;
+    const score=calcScore(c);
+    const bsr=binanceBsrData[c.id];
+    if(ratio>0.12&&Math.abs(p24)<3){
+      newAlerts.push({color:'var(--green)',text:`<strong>${c.symbol.toUpperCase()}</strong> 成交量異常放大（量/市值 ${(ratio*100).toFixed(1)}%），價格24h僅 ${p24>=0?'+':''}${p24.toFixed(1)}%，資金吸籌信號`,time:t,score});
+    }
+    if(bsr&&bsr.ratio>1.25&&Math.abs(p24)<5){
+      newAlerts.push({color:'var(--green)',text:`<strong>${c.symbol.toUpperCase()}</strong> Binance 買壓顯著（買賣比 ${bsr.ratio.toFixed(2)}），價格尚未反應`,time:t,score:score+5});
+    }
+    if(score>=75&&p24<2){
+      newAlerts.push({color:'var(--amber)',text:`<strong>${c.symbol.toUpperCase()}</strong> 綜合評分 ${score}分，資金已進場但價格未拉升，可列入觀察`,time:t,score});
+    }
+  });
+  newAlerts.sort((a,b)=>b.score-a.score);
+  alerts=[...newAlerts.slice(0,2),...alerts].slice(0,7);
+  if(!alerts.length){panel.innerHTML='<div style="text-align:center;color:var(--text3);padding:16px;font-family:var(--mono);font-size:11px;">暫無異常訊號</div>';return;}
+  panel.innerHTML=alerts.map((a,i)=>`
+    <div class="alert-item ${i===0?'flash':''}">
+      <div class="alert-dot" style="background:${a.color};"></div>
+      <div style="flex:1;">
+        <div class="alert-text">${a.text}</div>
+        <div class="alert-time">${a.time}</div>
+      </div>
+    </div>`).join('');
+}
+
+function updateMetrics(coins,fg){
+  const hot=coins.filter(c=>calcScore(c)>=70);
+  document.getElementById('m-hot').textContent=hot.length;
+  const btc=coins.find(c=>c.id==='bitcoin');
+  if(btc){
+    const dom=(btc.market_cap/coins.reduce((s,c)=>s+(c.market_cap||0),0)*100);
+    document.getElementById('m-btc-dom').textContent=dom.toFixed(1)+'%';
+    const chg=btc.price_change_percentage_24h||0;
+    const sub=document.getElementById('m-btc-sub');
+    sub.textContent=(chg>=0?'↑ BTC +':'↓ BTC ')+chg.toFixed(1)+'%';
+    sub.className='metric-sub '+(chg>=0?'up':'dn');
+  }
+  if(fg){
+    const val=parseInt(fg.value);lastFgVal=val;
+    document.getElementById('m-fg').textContent=val;
+    document.getElementById('m-fg').style.color=fgColor(val);
+    document.getElementById('m-fg-sub').textContent=fgLabel(val);
+    document.getElementById('fgVal').textContent=val+' — '+fgLabel(val);
+    document.getElementById('fgVal').style.color=fgColor(val);
+    document.getElementById('fgDesc').textContent=val<=40?'低恐懼 + 資金流入 = 高勝率建倉區間':val<=55?'市場情緒中性，保持觀察':'市場偏貪婪，注意追高風險';
+    document.getElementById('fgFill').style.width=val+'%';
+    document.getElementById('fgFill').style.background=val<=45?'var(--amber)':val<=55?'var(--text2)':'var(--green)';
+    document.getElementById('fgNeedle').style.left=val+'%';
+  }
+  document.getElementById('m-whale-count').textContent=whaleCount;
+  const totalBuy=Object.values(cumulativeBuy).reduce((s,d)=>s+d.buy,0);
+  const totalSell=Object.values(cumulativeBuy).reduce((s,d)=>s+d.sell,0);
+  if(totalBuy+totalSell>0){
+    const bsr=totalBuy/(totalBuy+totalSell)*2;
+    document.getElementById('m-bsr').textContent=bsr.toFixed(2);
+    document.getElementById('m-bsr').style.color=bsr>1.1?'var(--green)':bsr<0.9?'var(--red)':'var(--text)';
+    document.getElementById('m-bsr-sub').textContent=bsr>1.1?'買壓主導':bsr<0.9?'賣壓主導':'買賣均衡';
+  }
+}
+
+async function fetchFG(){
+  try{const r=await fetch(FG_API+'?limit=1');const d=await r.json();return d.data?.[0]||null;}
+  catch{return null;}
+}
+
+async function fetchCoins(){
+  const r=await fetch(`${CG}/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=150&page=1&sparkline=false&price_change_percentage=7d`);
+  if(!r.ok)throw new Error('CoinGecko 錯誤 '+r.status);
+  const data=await r.json();
+  return data.filter(c=>!isStablecoin(c)).slice(0,100);
+}
+
+function setStatus(msg){document.getElementById('loadingStatus').textContent=msg;}
+function updateTime(){document.getElementById('updateTime').textContent=new Date().toUTCString().slice(17,25)+' UTC';}
+
+// ── RSI 計算函數
+function calcRSI(closes, period = 14) {
+  if (closes.length < period + 1) return null;
+  let gains = 0, losses = 0;
+  for (let i = 1; i <= period; i++) {
+    const diff = closes[i] - closes[i - 1];
+    if (diff >= 0) gains += diff;
+    else losses -= diff;
+  }
+  let avgGain = gains / period;
+  let avgLoss = losses / period;
+  for (let i = period + 1; i < closes.length; i++) {
+    const diff = closes[i] - closes[i - 1];
+    const gain = diff >= 0 ? diff : 0;
+    const loss = diff < 0 ? -diff : 0;
+    avgGain = (avgGain * (period - 1) + gain) / period;
+    avgLoss = (avgLoss * (period - 1) + loss) / period;
+  }
+  if (avgLoss === 0) return 100;
+  const rs = avgGain / avgLoss;
+  return Math.round(100 - 100 / (1 + rs));
+}
+
+// Binance K線 interval 對應
+const TF_MAP = { '1h': '1h', '4h': '4h', '1d': '1d', '1w': '1w' };
+const TF_LIMIT = { '1h': 100, '4h': 100, '1d': 100, '1w': 52 };
+
+async function fetchRSIForSymbol(binanceSym, cgId) {
+  const tf = currentRsiTab;
+  const interval = TF_MAP[tf];
+  const limit = TF_LIMIT[tf];
+  try {
+    const r = await fetch(`${BINANCE}/klines?symbol=${binanceSym}&interval=${interval}&limit=${limit}`);
+    if (!r.ok) return;
+    const klines = await r.json();
+    const closes = klines.map(k => parseFloat(k[4]));
+    if (!rsiCache[cgId]) rsiCache[cgId] = {};
+    rsiCache[cgId][tf] = calcRSI(closes);
+  } catch {
+    if (!rsiCache[cgId]) rsiCache[cgId] = {};
+    rsiCache[cgId][currentRsiTab] = null;
+  }
+}
+
+async function fetchAllRSI(coins) {
+  const tf = currentRsiTab;
+  document.getElementById('rsiStatus').innerHTML = '<span class="spinner"></span> 載入中';
+  const targets = coins.filter(c => CG_TO_BINANCE[c.id]);
+  rsiCoins = targets;
+  let done = 0;
+  for (const coin of targets) {
+    const sym = CG_TO_BINANCE[coin.id];
+    await fetchRSIForSymbol(sym, coin.id);
+    done++;
+    if (done % 10 === 0) renderRSITable(tf);
+    await new Promise(r => setTimeout(r, 100));
+  }
+  document.getElementById('rsiStatus').textContent = `已掃描 ${done} 支`;
+  document.getElementById('rsiStatus').style.color = 'var(--green)';
+  renderRSITable(tf);
+}
+
+function rsiColor(val) {
+  if (val === null) return 'var(--text3)';
+  if (val >= 70) return 'var(--red)';
+  if (val <= 30) return 'var(--green)';
+  return 'var(--text2)';
+}
+function rsiClass(val) {
+  if (val === null) return 'loading';
+  if (val >= 70) return 'ob';
+  if (val <= 30) return 'os';
+  return 'mid';
+}
+function rsiStatus(val) {
+  if (val === null) return '<span style="color:var(--text3);font-size:10px;">--</span>';
+  if (val >= 80) return '<span class="tag" style="background:rgba(255,77,106,0.15);color:var(--red);border:1px solid rgba(255,77,106,0.25);">強力超買</span>';
+  if (val >= 70) return '<span class="tag" style="background:rgba(255,77,106,0.1);color:var(--red);border:1px solid rgba(255,77,106,0.2);">超買警示</span>';
+  if (val <= 20) return '<span class="tag" style="background:rgba(0,208,132,0.15);color:var(--green);border:1px solid rgba(0,208,132,0.25);">強力超賣</span>';
+  if (val <= 30) return '<span class="tag" style="background:rgba(0,208,132,0.1);color:var(--green);border:1px solid rgba(0,208,132,0.2);">超賣機會</span>';
+  if (val >= 55 && val < 70) return '<span class="tag" style="background:rgba(245,166,35,0.1);color:var(--amber);border:1px solid rgba(245,166,35,0.2);">偏強</span>';
+  if (val > 30 && val <= 45) return '<span class="tag" style="background:rgba(77,159,255,0.1);color:var(--blue);border:1px solid rgba(77,159,255,0.2);">偏弱</span>';
+  return '<span style="color:var(--text3);font-size:10px;">中性</span>';
+}
+
+function switchRsiTab(tf, el) {
+  currentRsiTab = tf;
+  document.querySelectorAll('.rsi-tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  // 若該時框已有快取直接渲染，否則重新抓取
+  const hasCacheForTf = rsiCoins.length > 0 &&
+    rsiCoins.some(c => rsiCache[c.id] && rsiCache[c.id][tf] !== undefined);
+  if (hasCacheForTf) {
+    renderRSITable(tf);
+  } else {
+    fetchAllRSI(rsiCoins);
+  }
+}
+
+function renderRSITable(tf) {
+  const area = document.getElementById('rsiBubbles');
+  const coins = rsiCoins;
+  if (!coins.length) return;
+
+  const withRsi = coins.map(c => ({
+    ...c,
+    rsi: rsiCache[c.id] ? rsiCache[c.id][tf] : null
+  }));
+
+  const oversold = withRsi.filter(c => c.rsi !== null && c.rsi <= 30);
+  const overbought = withRsi.filter(c => c.rsi !== null && c.rsi >= 70);
+  const allValid = withRsi.filter(c => c.rsi !== null);
+
+  // 更新統計
+  document.getElementById('rsOBCount').textContent = overbought.length;
+  document.getElementById('rsOSCount').textContent = oversold.length;
+  document.getElementById('rsTotal').textContent = allValid.length;
+  if (allValid.length) {
+    const avg = Math.round(allValid.reduce((s, c) => s + c.rsi, 0) / allValid.length);
+    document.getElementById('rsAvg').textContent = avg;
+  }
+
+  // 更新badge
+  document.getElementById('rsiStatus').textContent = `超賣 ${oversold.length} · 超買 ${overbought.length}`;
+  document.getElementById('rsiStatus').style.color = 'var(--amber)';
+
+  // 只顯示超買超賣
+  const display = [...oversold, ...overbought];
+
+  if (!display.length) {
+    area.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:rgba(255,255,255,0.3);font-family:var(--mono);font-size:12px;">目前無幣種 RSI 超過 70 或低於 30</div>';
+    return;
+  }
+
+  // 泡泡圖：X軸=幣種（均勻分布），Y軸=RSI值，大小=市值排名
+  const totalCoins = display.length;
+  area.innerHTML = display.map((c, i) => {
+    const rsi = c.rsi;
+    const isOB = rsi >= 70;
+    const isOS = rsi <= 30;
+
+    // Y軸：RSI 0-100 映射到 0-100%（上方=高RSI）
+    const yPct = 100 - rsi; // CSS top: 高RSI在上方
+
+    // X軸：均勻分布
+    const xPct = totalCoins === 1 ? 50 : (i / (totalCoins - 1)) * 88 + 6;
+
+    // 泡泡大小：市值排名越高越大，整體縮小
+    const rank = c.market_cap_rank || 50;
+    const size = Math.max(12, 24 - rank * 0.15);
+
+    // 顏色
+    const color = isOB ? 'var(--red)' : isOS ? 'var(--green)' : 'rgba(255,255,255,0.2)';
+    const glowColor = isOB ? 'rgba(255,77,106,0.4)' : 'rgba(0,208,132,0.4)';
+
+    const p24 = c.price_change_percentage_24h || 0;
+
+    return `<div style="position:absolute;left:${xPct}%;top:${yPct}%;transform:translate(-50%,-50%);display:flex;flex-direction:column;align-items:center;gap:2px;">
+      <span style="font-size:8px;font-family:var(--mono);color:#fff;text-shadow:0 1px 3px rgba(0,0,0,0.9);white-space:nowrap;font-weight:500;">${c.symbol.toUpperCase().slice(0,5)}</span>
+      <div class="rsi-bubble" style="
+        position:relative;left:auto;top:auto;transform:none;
+        width:${size}px;
+        height:${size}px;
+        background:${color};
+        opacity:0.85;
+        box-shadow:0 0 ${size/2}px ${glowColor};
+      ">
+        <div class="rsi-bubble-tooltip">
+          <div style="font-weight:500;margin-bottom:4px;">${c.name}</div>
+          <div>RSI: <span style="color:${color};">${rsi}</span></div>
+          <div>現價: ${formatPrice(c.current_price)}</div>
+          <div>24h: <span style="color:${p24>=0?'var(--green)':'var(--red)'};">${p24>=0?'+':''}${p24.toFixed(1)}%</span></div>
+          <div>市值排名: #${rank}</div>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function fetchAll(){
+  const btn=document.getElementById('refreshBtn');
+  btn.innerHTML='<span class="spinner"></span> 更新中';btn.disabled=true;
+  document.getElementById('errorMsg').style.display='none';
+  document.getElementById('scanStatus').innerHTML='<span class="spinner"></span>';
+  try{
+    setStatus('抓取恐懼貪婪指數...');
+    const fg=await fetchFG();
+    setStatus('抓取 CoinGecko 市場數據...');
+    const coins=await fetchCoins();allCoins=coins;
+    setStatus('抓取 Binance 買賣壓與大額交易...');
+    await fetchBinanceData(coins);
+    setStatus('計算評分與信號...');
+    updateMetrics(coins,fg);
+    const scored=coins.map(c=>({...c,_score:calcScore(c)})).sort((a,b)=>b._score-a._score);
+    renderCoins(scored);
+    renderSectors(coins);
+    renderWhales();
+    renderCumulative(coins);
+    renderAlerts(scored);
+    updateTime();
+    document.getElementById('scanStatus').textContent='已更新';
+    document.getElementById('scanStatus').style.color='var(--green)';
+    // 抓取 RSI（非同步，不阻塞主流程）
+    fetchAllRSI(coins);
+  }catch(e){
+    document.getElementById('errorMsg').textContent='錯誤：'+e.message;
+    document.getElementById('errorMsg').style.display='block';
+    document.getElementById('scanStatus').textContent='更新失敗';
+    document.getElementById('scanStatus').style.color='var(--red)';
+  }
+  btn.innerHTML='&#8635; 刷新';btn.disabled=false;
+  document.getElementById('loadingOverlay').style.display='none';
+}
+
+fetchAll();
+setInterval(fetchAll,5*60*1000);
+</script>
+</body>
+</html>
