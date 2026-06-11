@@ -538,89 +538,214 @@ function signalTags(coin){
   return tags;
 }
 
-// ── Binance: 批次抓 24h ticker（買賣比用 aggTrades 估算）
-async function fetchBinanceTickers(symbols){
+// ── 三交易所聚合：Binance + OKX + Bybit
+const OKX_BASE = 'https://www.okx.com/api/v5/market';
+const BYBIT_BASE = 'https://api.bybit.com/v5/market';
+
+// CoinGecko ID → OKX instId
+const CG_TO_OKX = {
+  'bitcoin':'BTC-USDT','ethereum':'ETH-USDT','ripple':'XRP-USDT',
+  'solana':'SOL-USDT','binancecoin':'BNB-USDT','cardano':'ADA-USDT',
+  'dogecoin':'DOGE-USDT','tron':'TRX-USDT','avalanche-2':'AVAX-USDT',
+  'chainlink':'LINK-USDT','toncoin':'TON-USDT','shiba-inu':'SHIB-USDT',
+  'stellar':'XLM-USDT','polkadot':'DOT-USDT','bitcoin-cash':'BCH-USDT',
+  'litecoin':'LTC-USDT','uniswap':'UNI-USDT','near':'NEAR-USDT',
+  'pepe':'PEPE-USDT','aave':'AAVE-USDT','aptos':'APT-USDT',
+  'cosmos':'ATOM-USDT','sui':'SUI-USDT','arbitrum':'ARB-USDT',
+  'optimism':'OP-USDT','injective-protocol':'INJ-USDT','filecoin':'FIL-USDT',
+  'hedera-hashgraph':'HBAR-USDT','internet-computer':'ICP-USDT',
+  'ethereum-classic':'ETC-USDT','bittensor':'TAO-USDT','render-token':'RENDER-USDT',
+  'fetch-ai':'FET-USDT','worldcoin-wld':'WLD-USDT','sei-network':'SEI-USDT',
+  'dydx':'DYDX-USDT','lido-dao':'LDO-USDT','maker':'MKR-USDT',
+  'curve-dao-token':'CRV-USDT','the-graph':'GRT-USDT','immutable-x':'IMX-USDT',
+  'floki':'FLOKI-USDT','kaspa':'KAS-USDT','dogwifcoin':'WIF-USDT',
+  'bonk':'BONK-USDT','hyperliquid':'HYPE-USDT',
+};
+
+// CoinGecko ID → Bybit symbol
+const CG_TO_BYBIT = {
+  'bitcoin':'BTCUSDT','ethereum':'ETHUSDT','ripple':'XRPUSDT',
+  'solana':'SOLUSDT','binancecoin':'BNBUSDT','cardano':'ADAUSDT',
+  'dogecoin':'DOGEUSDT','tron':'TRXUSDT','avalanche-2':'AVAXUSDT',
+  'chainlink':'LINKUSDT','toncoin':'TONUSDT','shiba-inu':'SHIBUSDT',
+  'stellar':'XLMUSDT','polkadot':'DOTUSDT','bitcoin-cash':'BCHUSDT',
+  'litecoin':'LTCUSDT','uniswap':'UNIUSDT','near':'NEARUSDT',
+  'pepe':'PEPEUSDT','aave':'AAVEUSDT','aptos':'APTUSDT',
+  'cosmos':'ATOMUSDT','sui':'SUIUSDT','arbitrum':'ARBUSDT',
+  'optimism':'OPUSDT','injective-protocol':'INJUSDT','filecoin':'FILUSDT',
+  'hedera-hashgraph':'HBARUSDT','internet-computer':'ICPUSDT',
+  'ethereum-classic':'ETCUSDT','bittensor':'TAOUSDT','render-token':'RENDERUSDT',
+  'fetch-ai':'FETUSDT','worldcoin-wld':'WLDUSDT','sei-network':'SEIUSDT',
+  'dydx':'DYDXUSDT','lido-dao':'LDOUSDT','maker':'MKRUSDT',
+  'curve-dao-token':'CRVUSDT','the-graph':'GRTUSDT','immutable-x':'IMXUSDT',
+  'floki':'FLOKIUSDT','kaspa':'KASUSDT','dogwifcoin':'WIFUSDT',
+  'bonk':'BONKUSDT',
+};
+
+// 從單一交易所抓近期成交並回傳 {buy, sell, trades[]}
+async function fetchTradesFromBinance(sym, price, minUSD){
   try{
-    const url=`${BINANCE}/ticker/24hr`;
-    const r=await fetch(url);
-    if(!r.ok)return;
+    const r=await fetch(`${BINANCE}/aggTrades?symbol=${sym}&limit=100`);
+    if(!r.ok)return null;
     const data=await r.json();
-    const map={};
-    data.forEach(d=>{ map[d.symbol]=d; });
-    symbols.forEach(({cgId,sym})=>{
-      const d=map[sym];
-      if(!d)return;
-      const buyVol=parseFloat(d.quoteVolume)*0.52; // 估算買方略多
-      const ratio=1.04; // 預設略偏多
-      binanceBsrData[cgId]={buyVol,ratio,quoteVol:parseFloat(d.quoteVolume)};
-    });
-  }catch(e){console.warn('Binance ticker error',e);}
-}
-
-// Binance: 抓單一幣種近期大額買入（用 aggTrades）
-async function fetchWhaleTradesForSymbol(symbol, cgId, coinName, minUSD){
-  try{
-    const r=await fetch(`${BINANCE}/aggTrades?symbol=${symbol}&limit=100`);
-    if(!r.ok)return;
-    const trades=await r.json();
-    const priceR=await fetch(`${BINANCE}/ticker/price?symbol=${symbol}`);
-    if(!priceR.ok)return;
-    const priceD=await priceR.json();
-    const price=parseFloat(priceD.price);
-    let coinBuyTotal=0,coinSellTotal=0;
-
-    trades.forEach(t=>{
+    let buy=0,sell=0;
+    const whaleTrades=[];
+    data.forEach(t=>{
       const qty=parseFloat(t.q);
       const usd=qty*price;
-      const isBuy=!t.m; // maker=false 表示主動買入
-      if(isBuy)coinBuyTotal+=usd;
-      else coinSellTotal+=usd;
-      if(usd>=minUSD){
-        whaleLog.unshift({
-          coin:coinName,symbol:symbol.replace('USDT',''),
-          dir:isBuy?'大買':'大賣',
-          usd,price,
-          time:timeNow(),
-          isBuy
-        });
-      }
+      const isBuy=!t.m;
+      if(isBuy)buy+=usd; else sell+=usd;
+      if(usd>=minUSD)whaleTrades.push({isBuy,usd,source:'Binance'});
     });
+    return{buy,sell,whaleTrades};
+  }catch(e){return null;}
+}
 
-    // 更新累計買入
-    if(!cumulativeBuy[cgId])cumulativeBuy[cgId]={name:coinName,symbol:symbol.replace('USDT',''),buy:0,sell:0,cgId};
-    cumulativeBuy[cgId].buy+=coinBuyTotal;
-    cumulativeBuy[cgId].sell+=coinSellTotal;
+async function fetchTradesFromOKX(instId, minUSD){
+  try{
+    const r=await fetch(`${OKX_BASE}/trades?instId=${instId}&limit=100`);
+    if(!r.ok)return null;
+    const data=await r.json();
+    if(data.code!=='0')return null;
+    let buy=0,sell=0;
+    const whaleTrades=[];
+    data.data.forEach(t=>{
+      const qty=parseFloat(t.sz);
+      const price=parseFloat(t.px);
+      const usd=qty*price;
+      const isBuy=t.side==='buy';
+      if(isBuy)buy+=usd; else sell+=usd;
+      if(usd>=minUSD)whaleTrades.push({isBuy,usd,source:'OKX'});
+    });
+    return{buy,sell,whaleTrades};
+  }catch(e){return null;}
+}
 
-    // 更新買賣比
-    if(coinBuyTotal+coinSellTotal>0){
-      const ratio=coinBuyTotal/(coinBuyTotal+coinSellTotal)*2;
-      if(binanceBsrData[cgId])binanceBsrData[cgId].ratio=ratio;
-      else binanceBsrData[cgId]={ratio,buyVol:coinBuyTotal,quoteVol:coinBuyTotal+coinSellTotal};
+async function fetchTradesFromBybit(sym, minUSD){
+  try{
+    const r=await fetch(`${BYBIT_BASE}/recent-trade?category=spot&symbol=${sym}&limit=100`);
+    if(!r.ok)return null;
+    const data=await r.json();
+    if(data.retCode!==0)return null;
+    let buy=0,sell=0;
+    const whaleTrades=[];
+    data.result.list.forEach(t=>{
+      const qty=parseFloat(t.size);
+      const price=parseFloat(t.price);
+      const usd=qty*price;
+      const isBuy=t.side==='Buy';
+      if(isBuy)buy+=usd; else sell+=usd;
+      if(usd>=minUSD)whaleTrades.push({isBuy,usd,source:'Bybit'});
+    });
+    return{buy,sell,whaleTrades};
+  }catch(e){return null;}
+}
+
+// 三交易所聚合抓取
+async function fetchAggregatedTrades(cgId, coinName, binanceSym, minUSD){
+  const okxId=CG_TO_OKX[cgId];
+  const bybitSym=CG_TO_BYBIT[cgId];
+
+  // 先取得價格（用 Binance ticker）
+  let price=0;
+  try{
+    const pr=await fetch(`${BINANCE}/ticker/price?symbol=${binanceSym}`);
+    if(pr.ok){const pd=await pr.json();price=parseFloat(pd.price);}
+  }catch(e){}
+
+  // 同時抓三個交易所
+  const [binanceResult, okxResult, bybitResult] = await Promise.all([
+    binanceSym ? fetchTradesFromBinance(binanceSym, price, minUSD) : Promise.resolve(null),
+    okxId ? fetchTradesFromOKX(okxId, minUSD) : Promise.resolve(null),
+    bybitSym ? fetchTradesFromBybit(bybitSym, minUSD) : Promise.resolve(null),
+  ]);
+
+  let totalBuy=0, totalSell=0;
+  const allWhaleTrades=[];
+
+  [binanceResult, okxResult, bybitResult].forEach(res=>{
+    if(!res)return;
+    totalBuy+=res.buy;
+    totalSell+=res.sell;
+    allWhaleTrades.push(...res.whaleTrades);
+  });
+
+  // 更新累計買入
+  if(!cumulativeBuy[cgId])cumulativeBuy[cgId]={name:coinName,symbol:binanceSym?binanceSym.replace('USDT',''):cgId,buy:0,sell:0,cgId};
+  cumulativeBuy[cgId].buy+=totalBuy;
+  cumulativeBuy[cgId].sell+=totalSell;
+
+  // 更新買賣比
+  if(totalBuy+totalSell>0){
+    const ratio=totalBuy/(totalBuy+totalSell)*2;
+    if(binanceBsrData[cgId])binanceBsrData[cgId].ratio=ratio;
+    else binanceBsrData[cgId]={ratio,buyVol:totalBuy,quoteVol:totalBuy+totalSell};
+  }
+
+  // 加入鯨魚日誌
+  allWhaleTrades.sort((a,b)=>b.usd-a.usd).slice(0,3).forEach(t=>{
+    whaleLog.unshift({
+      coin:coinName,
+      symbol:binanceSym?binanceSym.replace('USDT',''):cgId,
+      dir:t.isBuy?'大買':'大賣',
+      usd:t.usd,price,
+      time:timeNow(),
+      isBuy:t.isBuy,
+      source:t.source
+    });
+  });
+}
+
+async function fetchBinanceTickers(symbols){
+  // 三交易所 ticker 並行抓取，加總成交量後算初始買賣比
+  const [binanceData, okxData, bybitData] = await Promise.all([
+    fetch(`${BINANCE}/ticker/24hr`).then(r=>r.ok?r.json():null).catch(()=>null),
+    fetch(`${OKX_BASE}/tickers?instType=SPOT`).then(r=>r.ok?r.json():null).catch(()=>null),
+    fetch(`${BYBIT_BASE}/tickers?category=spot`).then(r=>r.ok?r.json():null).catch(()=>null),
+  ]);
+
+  const binanceMap={};
+  if(binanceData) binanceData.forEach(d=>{binanceMap[d.symbol]=d;});
+
+  const okxMap={};
+  if(okxData&&okxData.code==='0') okxData.data.forEach(d=>{okxMap[d.instId]=d;});
+
+  const bybitMap={};
+  if(bybitData&&bybitData.retCode===0) bybitData.result.list.forEach(d=>{bybitMap[d.symbol]=d;});
+
+  symbols.forEach(({cgId,sym})=>{
+    let totalVol=0;
+    const bd=binanceMap[sym];
+    if(bd) totalVol+=parseFloat(bd.quoteVolume)||0;
+    const okxId=CG_TO_OKX[cgId];
+    const od=okxMap[okxId];
+    if(od) totalVol+=parseFloat(od.volCcy24h)||0;
+    const bybitSym=CG_TO_BYBIT[cgId];
+    const yd=bybitMap[bybitSym];
+    if(yd) totalVol+=parseFloat(yd.turnover24h)||0;
+    if(totalVol>0){
+      binanceBsrData[cgId]={buyVol:totalVol*0.52,ratio:1.04,quoteVol:totalVol};
     }
-  }catch(e){/* silent */}
+  });
 }
 
 async function fetchBinanceData(coins){
-  // 挑前20名有 Binance 配對的幣
   const targets=[];
   coins.slice(0,40).forEach(c=>{
     const sym=CG_TO_BINANCE[c.id];
     if(sym)targets.push({cgId:c.id,sym,name:c.name});
   });
 
-  // 先抓 ticker
   await fetchBinanceTickers(targets);
 
-  // 再抓前10名的 aggTrades（避免 rate limit）
-  const minUSD=500000;
-  const top10=targets.slice(0,10);
-  for(const t of top10){
-    await fetchWhaleTradesForSymbol(t.sym,t.cgId,t.name,minUSD);
-    await new Promise(r=>setTimeout(r,120)); // 避免 rate limit
+  const minUSD=100000; // 降低門檻，三交易所聚合後更容易觸發
+  const top15=targets.slice(0,15);
+  for(const t of top15){
+    await fetchAggregatedTrades(t.cgId, t.name, t.sym, minUSD);
+    await new Promise(r=>setTimeout(r,150));
   }
 
-  // 去重 whaleLog（同幣同方向同金額）
-  whaleLog=whaleLog.slice(0,20);
+  whaleLog=whaleLog.slice(0,30);
   whaleCount=whaleLog.filter(w=>w.isBuy).length;
 }
 
@@ -682,7 +807,7 @@ function renderWhales(){
       <span class="whale-dir ${w.isBuy?'dir-buy':'dir-sell'}">${w.dir}</span>
       <div class="whale-info">
         <div class="whale-coin">${w.symbol} <span style="font-weight:400;font-size:11px;color:var(--text2);">@ ${formatPrice(w.price)}</span></div>
-        <div class="whale-detail">${formatUSD(w.usd)} USDT</div>
+        <div class="whale-detail">${formatUSD(w.usd)} USDT <span style="font-size:10px;color:var(--text3);margin-left:4px;">${w.source||'Binance'}</span></div>
       </div>
       <span class="whale-time">${w.time}</span>
     </div>`).join('');
@@ -851,20 +976,82 @@ function calcRSI(closes, period = 14) {
 const TF_MAP = { '1h': '1h', '4h': '4h', '1d': '1d', '1w': '1w' };
 const TF_LIMIT = { '1h': 100, '4h': 100, '1d': 100, '1w': 52 };
 
+// OKX K線時間框對應
+const OKX_TF_MAP = { '1h': '1H', '4h': '4H', '1d': '1D', '1w': '1W' };
+
 async function fetchRSIForSymbol(binanceSym, cgId) {
   const tf = currentRsiTab;
   const interval = TF_MAP[tf];
+  const okxInterval = OKX_TF_MAP[tf];
   const limit = TF_LIMIT[tf];
+  const okxId = CG_TO_OKX[cgId];
+  const bybitSym = CG_TO_BYBIT[cgId];
+
   try {
-    const r = await fetch(`${BINANCE}/klines?symbol=${binanceSym}&interval=${interval}&limit=${limit}`);
-    if (!r.ok) return;
-    const klines = await r.json();
-    const closes = klines.map(k => parseFloat(k[4]));
-    if (!rsiCache[cgId]) rsiCache[cgId] = {};
+    // 三交易所 K線並行抓取
+    const [binanceKlines, okxKlines, bybitKlines] = await Promise.all([
+      fetch(`${BINANCE}/klines?symbol=${binanceSym}&interval=${interval}&limit=${limit}`)
+        .then(r=>r.ok?r.json():null).catch(()=>null),
+      okxId ? fetch(`${OKX_BASE}/candles?instId=${okxId}&bar=${okxInterval}&limit=${limit}`)
+        .then(r=>r.ok?r.json():null).catch(()=>null) : Promise.resolve(null),
+      bybitSym ? fetch(`${BYBIT_BASE}/kline?category=spot&symbol=${bybitSym}&interval=${interval}&limit=${limit}`)
+        .then(r=>r.ok?r.json():null).catch(()=>null) : Promise.resolve(null),
+    ]);
+
+    // 各交易所收盤價 map（以時間戳為 key）
+    const priceMap = {};
+
+    if(binanceKlines && Array.isArray(binanceKlines)){
+      binanceKlines.forEach(k=>{
+        const ts = k[0];
+        if(!priceMap[ts]) priceMap[ts] = [];
+        priceMap[ts].push(parseFloat(k[4]));
+      });
+    }
+    if(okxKlines && okxKlines.code==='0'){
+      okxKlines.data.reverse().forEach(k=>{
+        // OKX ts是毫秒，與Binance對齊
+        const ts = parseInt(k[0]);
+        // 找最近的Binance時間戳
+        const nearest = Object.keys(priceMap).reduce((a,b)=>Math.abs(b-ts)<Math.abs(a-ts)?b:a, Object.keys(priceMap)[0]||ts);
+        if(Math.abs(nearest-ts)<3600000){
+          priceMap[nearest].push(parseFloat(k[4]));
+        }
+      });
+    }
+    if(bybitKlines && bybitKlines.retCode===0){
+      bybitKlines.result.list.reverse().forEach(k=>{
+        const ts = parseInt(k[0]);
+        const nearest = Object.keys(priceMap).reduce((a,b)=>Math.abs(b-ts)<Math.abs(a-ts)?b:a, Object.keys(priceMap)[0]||ts);
+        if(Math.abs(nearest-ts)<3600000){
+          priceMap[nearest].push(parseFloat(k[4]));
+        }
+      });
+    }
+
+    // 各時間點取平均收盤價
+    const closes = Object.keys(priceMap).sort((a,b)=>a-b).map(ts=>{
+      const prices = priceMap[ts];
+      return prices.reduce((s,p)=>s+p,0) / prices.length;
+    });
+
+    if(closes.length < 14) throw new Error('K線數量不足');
+    if(!rsiCache[cgId]) rsiCache[cgId] = {};
     rsiCache[cgId][tf] = calcRSI(closes);
   } catch {
-    if (!rsiCache[cgId]) rsiCache[cgId] = {};
-    rsiCache[cgId][currentRsiTab] = null;
+    // 退回只用 Binance
+    try {
+      const r = await fetch(`${BINANCE}/klines?symbol=${binanceSym}&interval=${interval}&limit=${limit}`);
+      if(r.ok){
+        const klines = await r.json();
+        const closes = klines.map(k=>parseFloat(k[4]));
+        if(!rsiCache[cgId]) rsiCache[cgId] = {};
+        rsiCache[cgId][tf] = calcRSI(closes);
+      }
+    } catch {
+      if(!rsiCache[cgId]) rsiCache[cgId] = {};
+      rsiCache[cgId][currentRsiTab] = null;
+    }
   }
 }
 
